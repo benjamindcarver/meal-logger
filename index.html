@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#ffffff" />
+  <title>Meal Logger</title>
+  <style>
+    :root { --radius: 16px; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      margin: 0; padding: 24px; background:#fff; color:#111;
+    }
+    .app { max-width: 560px; margin: 0 auto; }
+    h1 { font-size: 24px; margin: 0 0 16px; }
+    .card {
+      background:#fff; border:1px solid #eee; border-radius: var(--radius);
+      padding: 16px; box-shadow: 0 6px 20px rgba(0,0,0,0.06);
+      margin-bottom: 16px;
+    }
+    button {
+      appearance: none; border: 1px solid #ddd; background:#fff; color:#111;
+      padding: 14px 16px; border-radius: 14px; font-size: 16px; cursor: pointer;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+    }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; }
+    .grow { flex:1; }
+    .status { font-size: 14px; color:#444; min-height: 1.4em; }
+    textarea {
+      width: 100%; min-height: 110px; padding: 12px; font-size: 16px;
+      border:1px solid #ddd; border-radius: 12px; resize: vertical;
+    }
+    .pill { display:inline-block; font-size:12px; color:#555; background:#f3f3f3; padding:6px 10px; border-radius:999px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>Meal Logger</h1>
+
+    <div class="card">
+      <div class="row">
+        <button id="micBtn" class="grow">🎤 Hold to Speak</button>
+        <button id="logBtn">➕ Log</button>
+      </div>
+      <p class="status" id="status">Ready.</p>
+      <textarea id="fallback" placeholder="iPhone? Use keyboard mic here. Example: 'oikos 30g and ½ cup milk'"></textarea>
+      <div style="margin-top:8px;">
+        <span class="pill" id="supportPill">checking speech support…</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <button id="openSheetBtn" class="grow">📊 Open Report</button>
+        <button id="clearBtn">🧹 Clear Text</button>
+      </div>
+    </div>
+
+    <p style="font-size:12px;color:#666;">Tip: On iPhone, the mic button won’t work in Safari. Use the text box with the keyboard’s mic.</p>
+  </div>
+
+  <script>
+    // ====== CONFIG ======
+    const APPS_SCRIPT_URL = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE';
+    const REPORT_SHEET_URL = 'PASTE_YOUR_GOOGLE_SHEET_VIEW_URL_HERE';
+
+    // ====== PWA installability ======
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(console.error);
+      });
+    }
+
+    const micBtn = document.getElementById('micBtn');
+    const logBtn = document.getElementById('logBtn');
+    const openSheetBtn = document.getElementById('openSheetBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const statusEl = document.getElementById('status');
+    const fallbackEl = document.getElementById('fallback');
+    const supportPill = document.getElementById('supportPill');
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+    let listening = false;
+    let transcriptBuffer = '';
+
+    function updateSupportBadge() {
+      if (SR) {
+        supportPill.textContent = 'Speech recognition supported ✅';
+      } else {
+        supportPill.textContent = 'Speech recognition not supported (Safari iOS) ❌';
+      }
+    }
+    updateSupportBadge();
+
+    if (SR) {
+      recognition = new SR();
+      recognition.lang = 'en-US';
+      recognition.interimResults = true;
+      recognition.continuous = false;
+
+      recognition.onstart = () => setStatus('Listening…');
+      recognition.onend = () => {
+        listening = false;
+        micBtn.textContent = '🎤 Hold to Speak';
+        setStatus('Stopped.');
+      };
+      recognition.onerror = (e) => {
+        setStatus('Error: ' + (e.error || 'unknown'));
+      };
+      recognition.onresult = (e) => {
+        let finalText = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const res = e.results[i];
+          if (res.isFinal) finalText += res[0].transcript;
+        }
+        if (finalText) {
+          transcriptBuffer = finalText.trim();
+          fallbackEl.value = transcriptBuffer;
+          setStatus('Transcribed.');
+        }
+      };
+
+      // Hold to speak UX (desktop & android chrome)
+      micBtn.addEventListener('mousedown', startListening);
+      micBtn.addEventListener('touchstart', (ev) => { ev.preventDefault(); startListening(); });
+      micBtn.addEventListener('mouseup', stopListening);
+      micBtn.addEventListener('mouseleave', () => listening && stopListening());
+      micBtn.addEventListener('touchend', stopListening);
+
+      // Click toggles as a fallback
+      micBtn.addEventListener('click', () => {
+        if (!listening) startListening(); else stopListening();
+      });
+    } else {
+      micBtn.disabled = true;
+    }
+
+    function startListening() {
+      if (!recognition || listening) return;
+      listening = true;
+      micBtn.textContent = '🛑 Release to Stop';
+      transcriptBuffer = '';
+      try {
+        recognition.start();
+        setStatus('Listening…');
+      } catch (err) {
+        setStatus('Could not start mic: ' + err.message);
+      }
+    }
+
+    function stopListening() {
+      if (!recognition || !listening) return;
+      try { recognition.stop(); } catch (_) {}
+      listening = false;
+      micBtn.textContent = '🎤 Hold to Speak';
+    }
+
+    function setStatus(msg) { statusEl.textContent = msg; }
+
+    async function logMeal() {
+      const text = (fallbackEl.value || transcriptBuffer || '').trim();
+      if (!text) { setStatus('Nothing to log.'); return; }
+
+      setStatus('Logging…');
+      try {
+        const payload = {
+          timestamp: new Date().toISOString(),
+          mealText: text,
+          device: navigator.userAgent,
+          raw: text
+        };
+
+        const res = await fetch(APPS_SCRIPT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          mode: 'cors'
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.ok !== false) {
+          setStatus('Logged ✅');
+        } else {
+          setStatus('Failed to log: ' + (data.error || res.status));
+        }
+      } catch (err) {
+        setStatus('Network error: ' + err.message);
+      }
+    }
+
+    logBtn.addEventListener('click', logMeal);
+    openSheetBtn.addEventListener('click', () => {
+      if (!REPORT_SHEET_URL) {
+        alert('Add your Google Sheet URL in REPORT_SHEET_URL.');
+        return;
+      }
+      window.open(REPORT_SHEET_URL, '_blank');
+    });
+    clearBtn.addEventListener('click', () => { fallbackEl.value = ''; transcriptBuffer = ''; setStatus('Cleared.'); });
+  </script>
+</body>
+</html>
