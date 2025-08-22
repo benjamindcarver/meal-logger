@@ -62,9 +62,9 @@
   </div>
 
   <script>
-    // ====== CONFIG ======
-    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzRl1fGYwGpoAMtNyo4jsFc2CHyhrqETsX79Js4Ln8emR6xjcp3Stsj-iosQsq81G0z/exec';
-    const REPORT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1tY4BUbHUwBRu7whLBbEke-dTeZZUYkmoctwH4iAbn7E/edit?usp=sharing';
+    // ====== CONFIG (replace both placeholders) ======
+    const APPS_SCRIPT_URL = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE'; // must end with /exec
+    const REPORT_SHEET_URL = 'PASTE_YOUR_GOOGLE_SHEET_VIEW_URL_HERE';
 
     // ====== PWA installability ======
     if ('serviceWorker' in navigator) {
@@ -160,6 +160,7 @@
 
     function setStatus(msg) { statusEl.textContent = msg; }
 
+    // ====== Fixed: simple POST (no preflight) ======
     async function logMeal() {
       const text = (fallbackEl.value || transcriptBuffer || '').trim();
       if (!text) { setStatus('Nothing to log.'); return; }
@@ -173,13 +174,15 @@
           raw: text
         };
 
-        const res = await fetch(APPS_SCRIPT_URL, {
+        const res = await fetch(APPS_SCRIPT_URL + '?_t=' + Date.now(), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          mode: 'cors'
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // simple = no preflight
+          body: JSON.stringify(payload),                            // still JSON, but sent as text/plain
+          mode: 'cors',
+          cache: 'no-store'
         });
 
+        // Apps Script returns JSON; parse safely
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.ok !== false) {
           setStatus('Logged ✅');
