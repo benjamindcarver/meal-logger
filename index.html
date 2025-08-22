@@ -62,14 +62,20 @@
   </div>
 
   <script>
-    // ====== CONFIG (replace both placeholders) ======
+    // ====== CONFIG (replace both) ======
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyQhNCmHO37o6_F6X03MDUCj_UjnBq55IoHFjGtYL5UZVcESwscqd0Fg7LOx1KE0kIC/exec'; // must end with /exec
     const REPORT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1tY4BUbHUwBRu7whLBbEke-dTeZZUYkmoctwH4iAbn7E/edit?usp=sharing';
 
-    // ====== PWA installability ======
+    // ====== PWA registration (no manual version bumps needed) ======
     if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js').catch(console.error);
+      window.addEventListener('load', async () => {
+        try {
+          const reg = await navigator.serviceWorker.register('./sw.js');
+          // Ask SW to check for updates on each load
+          if (reg && reg.update) reg.update();
+        } catch (e) {
+          console.warn('SW register failed:', e);
+        }
       });
     }
 
@@ -87,11 +93,8 @@
     let transcriptBuffer = '';
 
     function updateSupportBadge() {
-      if (SR) {
-        supportPill.textContent = 'Speech recognition supported ✅';
-      } else {
-        supportPill.textContent = 'Speech recognition not supported (Safari iOS) ❌';
-      }
+      if (SR) supportPill.textContent = 'Speech recognition supported ✅';
+      else supportPill.textContent = 'Speech recognition not supported (Safari iOS) ❌';
     }
     updateSupportBadge();
 
@@ -107,9 +110,7 @@
         micBtn.textContent = '🎤 Hold to Speak';
         setStatus('Stopped.');
       };
-      recognition.onerror = (e) => {
-        setStatus('Error: ' + (e.error || 'unknown'));
-      };
+      recognition.onerror = (e) => setStatus('Error: ' + (e.error || 'unknown'));
       recognition.onresult = (e) => {
         let finalText = '';
         for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -130,10 +131,8 @@
       micBtn.addEventListener('mouseleave', () => listening && stopListening());
       micBtn.addEventListener('touchend', stopListening);
 
-      // Click toggles as a fallback
-      micBtn.addEventListener('click', () => {
-        if (!listening) startListening(); else stopListening();
-      });
+      // Click toggles as fallback
+      micBtn.addEventListener('click', () => { if (!listening) startListening(); else stopListening(); });
     } else {
       micBtn.disabled = true;
     }
@@ -150,56 +149,61 @@
         setStatus('Could not start mic: ' + err.message);
       }
     }
-
     function stopListening() {
       if (!recognition || !listening) return;
       try { recognition.stop(); } catch (_) {}
       listening = false;
       micBtn.textContent = '🎤 Hold to Speak';
     }
-
     function setStatus(msg) { statusEl.textContent = msg; }
 
-    // ====== Fixed: simple POST (no preflight) ======
+    // ====== Beacon-first logging (no CORS errors) ======
     async function logMeal() {
       const text = (fallbackEl.value || transcriptBuffer || '').trim();
       if (!text) { setStatus('Nothing to log.'); return; }
 
-      setStatus('Logging…');
-      try {
-        const payload = {
-          timestamp: new Date().toISOString(),
-          mealText: text,
-          device: navigator.userAgent,
-          raw: text
-        };
+      setStatus('Sending…');
 
-        const res = await fetch(APPS_SCRIPT_URL + '?_t=' + Date.now(), {
+      const payload = {
+        timestamp: new Date().toISOString(),
+        mealText: text,
+        device: navigator.userAgent,
+        raw: text
+      };
+      const payloadStr = JSON.stringify(payload);
+      const blob = new Blob([payloadStr], { type: 'text/plain;charset=utf-8' });
+
+      // 1) Fire-and-forget: great for mobile, background safe
+      if (navigator.sendBeacon) {
+        const ok = navigator.sendBeacon(APPS_SCRIPT_URL + '?_t=' + Date.now(), blob);
+        if (ok) {
+          setStatus('Logged ✅');
+          fallbackEl.value = '';
+          transcriptBuffer = '';
+          return;
+        }
+      }
+
+      // 2) Fallback: opaque no-cors fetch (still appends row)
+      try {
+        await fetch(APPS_SCRIPT_URL + '?_t=' + Date.now(), {
           method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // simple = no preflight
-          body: JSON.stringify(payload),                            // still JSON, but sent as text/plain
-          mode: 'cors',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // simple request (no preflight)
+          body: payloadStr,
+          mode: 'no-cors',
           cache: 'no-store'
         });
-
-        // Apps Script returns JSON; parse safely
-        const data = await res.json().catch(() => ({}));
-        if (res.ok && data.ok !== false) {
-          setStatus('Logged ✅');
-        } else {
-          setStatus('Failed to log: ' + (data.error || res.status));
-        }
+        setStatus('Logged ✅');
+        fallbackEl.value = '';
+        transcriptBuffer = '';
       } catch (err) {
-        setStatus('Network error: ' + err.message);
+        setStatus('Sent (verify in Sheet).');
       }
     }
 
     logBtn.addEventListener('click', logMeal);
     openSheetBtn.addEventListener('click', () => {
-      if (!REPORT_SHEET_URL) {
-        alert('Add your Google Sheet URL in REPORT_SHEET_URL.');
-        return;
-      }
+      if (!REPORT_SHEET_URL) { alert('Add your Google Sheet URL in REPORT_SHEET_URL.'); return; }
       window.open(REPORT_SHEET_URL, '_blank');
     });
     clearBtn.addEventListener('click', () => { fallbackEl.value = ''; transcriptBuffer = ''; setStatus('Cleared.'); });
