@@ -58,12 +58,32 @@
       </div>
     </div>
 
+    <!-- Stats (Today + 7 days) -->
+    <div class="card" id="statsCard">
+      <div class="row">
+        <b>Today</b>
+        <div class="grow"></div>
+        <span id="todayDate" class="status">–</span>
+      </div>
+      <ul id="todayList" class="status" style="list-style:none; padding-left:0; margin:8px 0 0 0;"></ul>
+      <div class="row" style="margin-top:6px; gap:8px; flex-wrap:wrap;">
+        <span class="pill">Protein kcal: <b id="pkcal">0</b></span>
+        <span class="pill">Carb kcal: <b id="ckcal">0</b></span>
+        <span class="pill">Fat kcal: <b id="fkcal">0</b></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <b>Last 7 days</b>
+      <ul id="seven" style="list-style:none; padding-left:0; margin:8px 0 0 0;"></ul>
+    </div>
+
     <p style="font-size:12px;color:#666;">Tip: On iPhone, the mic button won’t work in Safari. Use the text box with the keyboard’s mic.</p>
   </div>
 
   <script>
     // ====== CONFIG (replace both) ======
-    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwKqf2CTyFKkYyI4GxiCEhpFESEwERhWcIf67q6KJaegaPeoo5VZg6oQ17VYeaZrD1d/exec'; // must end with /exec
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyIPliOO7gysx8QhS0QL6j9YVwv2915nMpGLHJBMhJ7pQTs-O79FxBHqBY4BOH9GtM/exec'; // must end with /exec
     const REPORT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1tY4BUbHUwBRu7whLBbEke-dTeZZUYkmoctwH4iAbn7E/edit?usp=sharing';
 
     // ====== PWA registration (no manual version bumps needed) ======
@@ -178,8 +198,10 @@
         const ok = navigator.sendBeacon(APPS_SCRIPT_URL + '?_t=' + Date.now(), blob);
         if (ok) {
           setStatus('Logged ✅');
-          fallbackEl.value = '';
-          transcriptBuffer = '';
+        fallbackEl.value = '';
+        transcriptBuffer = '';
+        await pollStats();
+          await pollStats();
           return;
         }
       }
@@ -207,6 +229,52 @@
       window.open(REPORT_SHEET_URL, '_blank');
     });
     clearBtn.addEventListener('click', () => { fallbackEl.value = ''; transcriptBuffer = ''; setStatus('Cleared.'); });
+  // ====== Stats API (fetch from Apps Script) ======
+    async function loadStats() {
+      try {
+        const r = await fetch(APPS_SCRIPT_URL + '?action=stats&v=' + Date.now(), { cache: 'no-store' });
+        const d = await r.json();
+        if (d.status === 'pending') return d; // caller can poll
+        renderStats(d);
+        return d;
+      } catch (e) { /* ignore */ }
+    }
+    async function pollStats(retries=8) {
+      for (let i=0;i<retries;i++) {
+        const d = await loadStats();
+        if (d && d.status === 'ok') return;
+        await new Promise(r=>setTimeout(r, 1200));
+      }
+      await loadStats();
+    }
+    function renderStats(d){
+      const t = d && d.today ? d.today : {cal:0,protein:0,carbs:0,fat:0,fiber:0,sugar:0};
+      const g = d && d.goals ? d.goals : { calMax:1800, proteinMin:100, fatMaxG:40, carbsMaxG:260, fiberMin:38, sugarMax:36 };
+      document.getElementById('todayDate').textContent = (d && d.date) || '—';
+      const L = [
+        ['Calories', `${t.cal} / ${g.calMax}`],
+        ['Protein (g)', `${t.protein} / ${g.proteinMin}`],
+        ['Carbs (g)', `${t.carbs} / ${g.carbsMaxG}`],
+        ['Fat (g)', `${t.fat} / ${g.fatMaxG}`],
+        ['Fiber (g)', `${t.fiber} / ${g.fiberMin}`],
+        ['Sugar (g)', `${t.sugar} / ${g.sugarMax}`]
+      ];
+      const ul = document.getElementById('todayList');
+      ul.innerHTML = L.map(([k,v])=>`<li>${k}: <b>${v}</b></li>`).join('');
+      const mk = d && d.macroKcal ? d.macroKcal : {proteinKcal:0,carbKcal:0,fatKcal:0};
+      document.getElementById('pkcal').textContent = mk.proteinKcal;
+      document.getElementById('ckcal').textContent = mk.carbKcal;
+      document.getElementById('fkcal').textContent = mk.fatKcal;
+      const seven = document.getElementById('seven');
+      seven.innerHTML = '';
+      (d && d.sevenDays ? d.sevenDays : []).forEach(row=>{
+        const li = document.createElement('li');
+        li.innerHTML = `<b>${row.date}</b> — ${row.cal} kcal · P ${row.protein}g · C ${row.carbs}g · F ${row.fat}g · Fiber ${row.fiber}g · Sugar ${row.sugar}g`;
+        seven.appendChild(li);
+      });
+    }
+    // initial stats load
+    loadStats();
   </script>
 </body>
 </html>
