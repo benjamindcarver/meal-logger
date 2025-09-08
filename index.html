@@ -33,6 +33,10 @@
       border:1px solid #ddd; border-radius: 12px; resize: vertical;
     }
     .pill { display:inline-block; font-size:12px; color:#555; background:#f3f3f3; padding:6px 10px; border-radius:999px; }
+    .thumb { display:none; max-width:140px; max-height:140px; border-radius:12px; border:1px solid #eee; margin-top:8px; }
+    .help { font-size:12px; color:#666; }
+    label.file { border:1px dashed #ddd; padding:10px 12px; border-radius:12px; cursor:pointer; display:inline-block; }
+    input[type="file"] { display:none; }
   </style>
 </head>
 <body>
@@ -46,6 +50,16 @@
       </div>
       <p class="status" id="status">Ready.</p>
       <textarea id="fallback" placeholder="iPhone? Use keyboard mic here. Example: 'oikos 30g and ½ cup milk'"></textarea>
+
+      <!-- NEW: Photo attach -->
+      <div class="row" style="margin-top:10px; align-items:center;">
+        <label for="photo" class="file">📷 Attach photo</label>
+        <input id="photo" type="file" accept="image/*" capture="environment" />
+        <div class="grow"></div>
+        <button id="clearPhotoBtn" style="display:none;">Remove photo</button>
+      </div>
+      <img id="preview" class="thumb" alt="Selected photo preview" />
+
       <div style="margin-top:8px;">
         <span class="pill" id="supportPill">checking speech support…</span>
       </div>
@@ -78,12 +92,12 @@
       <ul id="seven" style="list-style:none; padding-left:0; margin:8px 0 0 0;"></ul>
     </div>
 
-    <p style="font-size:12px;color:#666;">Tip: On iPhone, the mic button won’t work in Safari. Use the text box with the keyboard’s mic.</p>
+    <p class="help">Tip: On iPhone, the mic button won’t work in Safari. Use the text box with the keyboard’s mic.</p>
   </div>
 
   <script>
-    // ====== CONFIG (replace both) ======
-    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyEd01Zv9kc_LSM7psMLw0JCL4MMiboHvVtl6hHVyiZkLot-MY0zh4MJtzIy5CimAbU/exec'; // must end with /exec
+    // ====== CONFIG (replace both if needed) ======
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyIPliOO7gysx8QhS0QL6j9YVwv2915nMpGLHJBMhJ7pQTs-O79FxBHqBY4BOH9GtM/exec'; // must end with /exec
     const REPORT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1tY4BUbHUwBRu7whLBbEke-dTeZZUYkmoctwH4iAbn7E/edit?usp=sharing';
 
     // ====== PWA registration (no manual version bumps needed) ======
@@ -91,7 +105,6 @@
       window.addEventListener('load', async () => {
         try {
           const reg = await navigator.serviceWorker.register('./sw.js');
-          // Ask SW to check for updates on each load
           if (reg && reg.update) reg.update();
         } catch (e) {
           console.warn('SW register failed:', e);
@@ -107,6 +120,34 @@
     const fallbackEl = document.getElementById('fallback');
     const supportPill = document.getElementById('supportPill');
 
+    // NEW: photo elements
+    const photoInput = document.getElementById('photo');
+    const preview = document.getElementById('preview');
+    const clearPhotoBtn = document.getElementById('clearPhotoBtn');
+    let photoBase64 = null, photoMime = null;
+
+    // ====== Photo handling ======
+    photoInput.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) { clearPhoto(); return; }
+      photoMime = file.type || 'image/jpeg';
+      const buf = await file.arrayBuffer();
+      // web-safe base64
+      photoBase64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      // preview
+      preview.src = URL.createObjectURL(file);
+      preview.style.display = 'block';
+      clearPhotoBtn.style.display = 'inline-block';
+    });
+    clearPhotoBtn.addEventListener('click', (e) => { e.preventDefault(); clearPhoto(); });
+    function clearPhoto(){
+      photoBase64 = null; photoMime = null;
+      preview.src = ''; preview.style.display = 'none';
+      photoInput.value = '';
+      clearPhotoBtn.style.display = 'none';
+    }
+
+    // ====== Speech recognition ======
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     let recognition = null;
     let listening = false;
@@ -177,10 +218,10 @@
     }
     function setStatus(msg) { statusEl.textContent = msg; }
 
-    // ====== Beacon-first logging (no CORS errors) ======
+    // ====== Beacon-first logging ======
     async function logMeal() {
       const text = (fallbackEl.value || transcriptBuffer || '').trim();
-      if (!text) { setStatus('Nothing to log.'); return; }
+      if (!text && !photoBase64) { setStatus('Nothing to log.'); return; }
 
       setStatus('Sending…');
 
@@ -188,29 +229,32 @@
         timestamp: new Date().toISOString(),
         mealText: text,
         device: navigator.userAgent,
-        raw: text
+        raw: text,
+        // NEW: photo fields (may be null)
+        photoBase64,
+        photoMime
       };
       const payloadStr = JSON.stringify(payload);
       const blob = new Blob([payloadStr], { type: 'text/plain;charset=utf-8' });
 
-      // 1) Fire-and-forget: great for mobile, background safe
+      // 1) Fire-and-forget
       if (navigator.sendBeacon) {
         const ok = navigator.sendBeacon(APPS_SCRIPT_URL + '?_t=' + Date.now(), blob);
         if (ok) {
           setStatus('Logged ✅');
-        fallbackEl.value = '';
-        transcriptBuffer = '';
-        await pollStats();
+          fallbackEl.value = '';
+          transcriptBuffer = '';
+          clearPhoto();
           await pollStats();
           return;
         }
       }
 
-      // 2) Fallback: opaque no-cors fetch (still appends row)
+      // 2) Fallback fetch
       try {
         await fetch(APPS_SCRIPT_URL + '?_t=' + Date.now(), {
           method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // simple request (no preflight)
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: payloadStr,
           mode: 'no-cors',
           cache: 'no-store'
@@ -218,6 +262,8 @@
         setStatus('Logged ✅');
         fallbackEl.value = '';
         transcriptBuffer = '';
+        clearPhoto();
+        await pollStats();
       } catch (err) {
         setStatus('Sent (verify in Sheet).');
       }
@@ -229,7 +275,8 @@
       window.open(REPORT_SHEET_URL, '_blank');
     });
     clearBtn.addEventListener('click', () => { fallbackEl.value = ''; transcriptBuffer = ''; setStatus('Cleared.'); });
-  // ====== Stats API (fetch from Apps Script) ======
+
+    // ====== Stats API (fetch from Apps Script) ======
     async function loadStats() {
       try {
         const r = await fetch(APPS_SCRIPT_URL + '?action=stats&v=' + Date.now(), { cache: 'no-store' });
