@@ -1,3 +1,35 @@
+window.addEventListener('error', (e) => {
+  const el = document.getElementById('status');
+  if (el) el.textContent = 'Init error: ' + (e.message || 'unknown');
+});
+
+// Photo processing util
+async function processSelectedFile(file){
+  if (!file) { clearPhoto(); return; }
+  photoMime = 'image/jpeg';
+  try {
+    photoBase64 = await fileToResizedBase64(file, 1280, 0.72);
+  } catch {
+    const buf = await file.arrayBuffer();
+    photoBase64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    photoMime = file.type || 'image/jpeg';
+  }
+  if (preview) {
+    preview.src = URL.createObjectURL(file);
+    preview.style.display = 'block';
+  }
+  if (clearPhotoBtn) clearPhotoBtn.style.display = 'inline-block';
+}
+
+// Wire inputs/buttons safely (no-crash if any are missing)
+if (photoInput) photoInput.addEventListener('change', async (e)=>{ await processSelectedFile(e.target.files?.[0]); });
+if (cameraInput) cameraInput.addEventListener('change', async (e)=>{ await processSelectedFile(e.target.files?.[0]); });
+if (takePhotoBtn) takePhotoBtn.addEventListener('click', (e)=>{ e.preventDefault(); cameraInput && cameraInput.click(); });
+if (uploadPhotoBtn) uploadPhotoBtn.addEventListener('click', (e)=>{ e.preventDefault(); photoInput && photoInput.click(); });
+if (clearPhotoBtn) clearPhotoBtn.addEventListener('click', (e)=>{ e.preventDefault(); clearPhoto(); });
+
+
+
 <!doctype html>
 <html lang="en">
 <head>
