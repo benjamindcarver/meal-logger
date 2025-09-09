@@ -33,6 +33,10 @@
       border:1px solid #ddd; border-radius: 12px; resize: vertical;
     }
     .pill { display:inline-block; font-size:12px; color:#555; background:#f3f3f3; padding:6px 10px; border-radius:999px; }
+    .thumb { display:none; max-width:140px; max-height:140px; border-radius:12px; border:1px solid #eee; margin-top:8px; }
+    .help { font-size:12px; color:#666; }
+    label.file { border:1px dashed #ddd; padding:10px 12px; border-radius:12px; cursor:pointer; display:inline-block; }
+    input[type="file"] { display:none; }
   </style>
 </head>
 <body>
@@ -46,6 +50,19 @@
       </div>
       <p class="status" id="status">Ready.</p>
       <textarea id="fallback" placeholder="iPhone? Use keyboard mic here. Example: 'oikos 30g and ½ cup milk'"></textarea>
+
+      <!-- NEW: Photo attach -->
+      <div class="row" style="margin-top:10px; align-items:center;">
+        <button id="takePhotoBtn">📷 Take photo</button>
+        <button id="uploadPhotoBtn">🖼️ Upload photo</button>
+        <div class="grow"></div>
+        <button id="clearPhotoBtn" style="display:none;">Remove photo</button>
+      </div>
+      <!-- hidden inputs for camera vs gallery -->
+      <input id="camera" type="file" accept="image/*" capture="environment" style="display:none;" />
+      <input id="photo" type="file" accept="image/*" style="display:none;" />
+      <img id="preview" class="thumb" alt="Selected photo preview" />
+
       <div style="margin-top:8px;">
         <span class="pill" id="supportPill">checking speech support…</span>
       </div>
@@ -78,12 +95,12 @@
       <ul id="seven" style="list-style:none; padding-left:0; margin:8px 0 0 0;"></ul>
     </div>
 
-    <p style="font-size:12px;color:#666;">Tip: On iPhone, the mic button won’t work in Safari. Use the text box with the keyboard’s mic. Ver 3</p>
+    <p class="help">Tip: On iPhone, the mic button won’t work in Safari. Use the text box with the keyboard’s mic. Ver 4 </p>
   </div>
 
   <script>
-    // ====== CONFIG (replace both) ======
-    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyIPliOO7gysx8QhS0QL6j9YVwv2915nMpGLHJBMhJ7pQTs-O79FxBHqBY4BOH9GtM/exec'; // must end with /exec
+    // ====== CONFIG (replace both if needed) ======
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxhXYsfprnJfjxc--iy4iBtXJPw3I1a1rstxfXLf3w7VLnGahTYVPUH2COQiaZyHRmC/exec'; // must end with /exec
     const REPORT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1tY4BUbHUwBRu7whLBbEke-dTeZZUYkmoctwH4iAbn7E/edit?usp=sharing';
 
     // ====== PWA registration (no manual version bumps needed) ======
@@ -91,7 +108,6 @@
       window.addEventListener('load', async () => {
         try {
           const reg = await navigator.serviceWorker.register('./sw.js');
-          // Ask SW to check for updates on each load
           if (reg && reg.update) reg.update();
         } catch (e) {
           console.warn('SW register failed:', e);
@@ -107,6 +123,69 @@
     const fallbackEl = document.getElementById('fallback');
     const supportPill = document.getElementById('supportPill');
 
+    // NEW: photo elements
+    const photoInput = document.getElementById('photo');       // gallery picker
+    const cameraInput = document.getElementById('camera');     // camera capture
+    const preview = document.getElementById('preview');
+    const clearPhotoBtn = document.getElementById('clearPhotoBtn');
+    const takePhotoBtn = document.getElementById('takePhotoBtn');
+    const uploadPhotoBtn = document.getElementById('uploadPhotoBtn');
+    let photoBase64 = null, photoMime = null;
+    // Resize to ~1280px max side, JPEG ~72% to keep payload small
+    async function fileToResizedBase64(file, maxSide=1280, quality=0.72) {
+      const dataUrl = await new Promise(res => {
+        const fr = new FileReader();
+        fr.onload = () => res(fr.result);
+        fr.readAsDataURL(file);
+      });
+      const img = await new Promise((res, rej) => {
+        const i = new Image();
+        i.onload = () => res(i);
+        i.onerror = rej;
+        i.src = dataUrl;
+      });
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      const out = canvas.toDataURL('image/jpeg', quality);
+      return out.split(',')[1]; // base64 only
+    }
+
+    // Photo processing util
+    async function processSelectedFile(file){
+      if (!file) { clearPhoto(); return; }
+      photoMime = 'image/jpeg';
+      try {
+        photoBase64 = await fileToResizedBase64(file, 1280, 0.72);
+      } catch {
+        const buf = await file.arrayBuffer();
+        photoBase64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+        photoMime = file.type || 'image/jpeg';
+      }
+      preview.src = URL.createObjectURL(file);
+      preview.style.display = 'block';
+      if (clearPhotoBtn) clearPhotoBtn.style.display = 'inline-block';
+    }
+
+    // Wire inputs
+    if (photoInput) photoInput.addEventListener('change', async (e)=>{
+      const f = e.target.files?.[0];
+      await processSelectedFile(f);
+    });
+    if (cameraInput) cameraInput.addEventListener('change', async (e)=>{
+      const f = e.target.files?.[0];
+      await processSelectedFile(f);
+    });
+    if (takePhotoBtn) takePhotoBtn.addEventListener('click', (e)=>{ e.preventDefault(); cameraInput && cameraInput.click(); });
+    if (uploadPhotoBtn) uploadPhotoBtn.addEventListener('click', (e)=>{ e.preventDefault(); photoInput && photoInput.click(); });
+    if (clearPhotoBtn) clearPhotoBtn.addEventListener('click', (e)=>{ e.preventDefault(); clearPhoto(); }); clearPhoto(); });
+
+
+    // ====== Speech recognition ======
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     let recognition = null;
     let listening = false;
@@ -177,10 +256,18 @@
     }
     function setStatus(msg) { statusEl.textContent = msg; }
 
-    // ====== Beacon-first logging (no CORS errors) ======
+    // Clear photo helper
+    function clearPhoto(){
+      photoBase64 = null; photoMime = null;
+      if (preview) { preview.src=''; preview.style.display='none'; }
+      if (clearPhotoBtn) clearPhotoBtn.style.display = 'none';
+      if (photoInput) photoInput.value = '';
+    }
+
+    // ====== Beacon-first logging ======
     async function logMeal() {
       const text = (fallbackEl.value || transcriptBuffer || '').trim();
-      if (!text) { setStatus('Nothing to log.'); return; }
+      if (!text && !photoBase64) { setStatus('Nothing to log.'); return; }
 
       setStatus('Sending…');
 
@@ -188,29 +275,32 @@
         timestamp: new Date().toISOString(),
         mealText: text,
         device: navigator.userAgent,
-        raw: text
+        raw: text,
+        // NEW: photo fields (may be null)
+        photoBase64,
+        photoMime
       };
       const payloadStr = JSON.stringify(payload);
       const blob = new Blob([payloadStr], { type: 'text/plain;charset=utf-8' });
 
-      // 1) Fire-and-forget: great for mobile, background safe
-      if (navigator.sendBeacon) {
-        const ok = navigator.sendBeacon(APPS_SCRIPT_URL + '?_t=' + Date.now(), blob);
-        if (ok) {
-          setStatus('Logged ✅');
-        fallbackEl.value = '';
-        transcriptBuffer = '';
-        await pollStats();
-          await pollStats();
-          return;
-        }
-      }
+// 1) Fire-and-forget (text only). Photos use fetch for reliability.
+if (navigator.sendBeacon && !photoBase64) {
+  const ok = navigator.sendBeacon(APPS_SCRIPT_URL + '?_t=' + Date.now(), blob);
+  if (ok) {
+    setStatus('Logged ✅');
+    fallbackEl.value = '';
+    transcriptBuffer = '';
+    clearPhoto();
+    await pollStats();
+    return;
+  }
+}
 
-      // 2) Fallback: opaque no-cors fetch (still appends row)
+      // 2) Fallback fetch
       try {
         await fetch(APPS_SCRIPT_URL + '?_t=' + Date.now(), {
           method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // simple request (no preflight)
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: payloadStr,
           mode: 'no-cors',
           cache: 'no-store'
@@ -218,6 +308,8 @@
         setStatus('Logged ✅');
         fallbackEl.value = '';
         transcriptBuffer = '';
+        clearPhoto();
+        await pollStats();
       } catch (err) {
         setStatus('Sent (verify in Sheet).');
       }
@@ -229,7 +321,8 @@
       window.open(REPORT_SHEET_URL, '_blank');
     });
     clearBtn.addEventListener('click', () => { fallbackEl.value = ''; transcriptBuffer = ''; setStatus('Cleared.'); });
-  // ====== Stats API (fetch from Apps Script) ======
+
+    // ====== Stats API (fetch from Apps Script) ======
     async function loadStats() {
       try {
         const r = await fetch(APPS_SCRIPT_URL + '?action=stats&v=' + Date.now(), { cache: 'no-store' });
