@@ -37,7 +37,10 @@
     .help { font-size:12px; color:#666; }
     label.file { border:1px dashed #ddd; padding:10px 12px; border-radius:12px; cursor:pointer; display:inline-block; }
     input[type="file"] { display:none; }
+      .charts-two { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    @media (max-width: 520px){ .charts-two { grid-template-columns: 1fr; } }
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
   <div class="app">
@@ -91,16 +94,39 @@
     </div>
 
     <div class="card">
+      <b>7-Day Calories</b>
+      <canvas id="line7Cal" width="520" height="220"></canvas>
+    </div>
+
+    <div class="card">
+      <b>7-Day Macros (g)</b>
+      <canvas id="line7Macros" width="520" height="220"></canvas>
+    </div>
+
+    <div class="card">
+      <b>Today Macro Share (kcal %)</b>
+      <canvas id="pieMacroShare" width="520" height="220"></canvas>
+    </div>
+
+    <div class="card">
+      <b>Today vs Goals</b>
+      <div class="charts-two">
+        <div><canvas id="pieCalGoal" width="240" height="220"></canvas></div>
+        <div><canvas id="pieProteinGoal" width="240" height="220"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card">
       <b>Last 7 days</b>
       <ul id="seven" style="list-style:none; padding-left:0; margin:8px 0 0 0;"></ul>
     </div>
 
-    <p class="help">Tip: On iPhone, the mic button won’t work in Safari. Use the text box with the keyboard’s mic. Ver 9 </p>
+    <p class="help">Tip: On iPhone, the mic button won’t work in Safari. Use the text box with the keyboard’s mic. Ver 10 </p>
   </div>
 
   <script>
     // ====== CONFIG (replace both if needed) ======
-    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwC2m2A082RmR7OFlPUqoISUVpaIEkmSOl_NbX2FbLUndKpVCe6ftJ-hpFADTrWBTdh/exec'; // must end with /exec
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxef5IK-eK6Od9TYRtYmtxGUi0lW6cksHSBUkfi9PXU8jQp0hPUToLECe4jFIk7FVlE/exec'; // must end with /exec
     const REPORT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1tY4BUbHUwBRu7whLBbEke-dTeZZUYkmoctwH4iAbn7E/edit?usp=sharing';
 
     // ====== PWA registration (no manual version bumps needed) ======
@@ -365,6 +391,70 @@ if (navigator.sendBeacon && !photoBase64) {
         li.innerHTML = `<b>${row.date}</b> — ${row.cal} kcal · P ${row.protein}g · C ${row.carbs}g · F ${row.fat}g · Fiber ${row.fiber}g · Sugar ${row.sugar}g`;
         seven.appendChild(li);
       });
+
+      renderCharts(d);
+    }
+
+    // ====== Charts ======
+    let chCal7, chMacros7, chPieShare, chPieCalGoal, chPieProtGoal;
+    function renderCharts(d){
+      const seven = (d && d.sevenDays) ? d.sevenDays : [];
+      const labels = seven.map(s => s.date);
+      const cal = seven.map(s => s.cal || 0);
+      const p = seven.map(s => s.protein || 0);
+      const c = seven.map(s => s.carbs || 0);
+      const f = seven.map(s => s.fat || 0);
+
+      // Line: 7-day calories
+      const ctx1 = document.getElementById('line7Cal')?.getContext('2d');
+      if (ctx1){ if (chCal7) chCal7.destroy(); chCal7 = new Chart(ctx1, {
+        type: 'line', data: { labels, datasets: [{ label: 'Calories', data: cal, tension: 0.3 }] },
+        options: { responsive:true, plugins:{ legend:{ display:false } }, scales:{ x:{ ticks:{ autoSkip:true } }, y:{ beginAtZero:true } } }
+      }); }
+
+      // Line: 7-day macros grams
+      const ctx2 = document.getElementById('line7Macros')?.getContext('2d');
+      if (ctx2){ if (chMacros7) chMacros7.destroy(); chMacros7 = new Chart(ctx2, {
+        type: 'line', data: { labels, datasets: [
+          { label: 'Protein (g)', data: p, tension: 0.3 },
+          { label: 'Carbs (g)', data: c, tension: 0.3 },
+          { label: 'Fat (g)', data: f, tension: 0.3 }
+        ] },
+        options: { responsive:true, plugins:{ legend:{ position:'bottom' } }, scales:{ y:{ beginAtZero:true } } }
+      }); }
+
+      // Pie: today macro share (kcal %)
+      const mk = d && d.macroKcal ? d.macroKcal : {proteinKcal:0,carbKcal:0,fatKcal:0};
+      const ctx3 = document.getElementById('pieMacroShare')?.getContext('2d');
+      if (ctx3){ if (chPieShare) chPieShare.destroy(); chPieShare = new Chart(ctx3, {
+        type:'pie', data:{ labels:['Protein kcal','Carb kcal','Fat kcal'], datasets:[{ data:[mk.proteinKcal||0, mk.carbKcal||0, mk.fatKcal||0] }] },
+        options:{ responsive:true, plugins:{ legend:{ position:'bottom' } } }
+      }); }
+
+      // Pies: today vs goals
+      const t = d && d.today ? d.today : {cal:0,protein:0};
+      const g = d && d.goals ? d.goals : { calMax:1800, proteinMin:100 };
+      // calories vs goal (include over slice if any)
+      const overCal = Math.max(0, (t.cal||0) - (g.calMax||0));
+      const remCal = Math.max(0, (g.calMax||0) - (t.cal||0));
+      const dataCal = overCal>0 ? [t.cal - overCal, remCal, overCal] : [t.cal||0, remCal];
+      const labelsCal = overCal>0 ? ['Eaten','Remaining','Over'] : ['Eaten','Remaining'];
+      const ctx4 = document.getElementById('pieCalGoal')?.getContext('2d');
+      if (ctx4){ if (chPieCalGoal) chPieCalGoal.destroy(); chPieCalGoal = new Chart(ctx4, {
+        type:'pie', data:{ labels: labelsCal, datasets:[{ data: dataCal }] },
+        options:{ responsive:true, plugins:{ legend:{ position:'bottom' }, title:{ display:true, text:`Calories ${t.cal||0}/${g.calMax||0}` } } }
+      }); }
+
+      // protein vs goal (min target): show met/remaining/over
+      const overP = Math.max(0, (t.protein||0) - (g.proteinMin||0));
+      const remP = Math.max(0, (g.proteinMin||0) - (t.protein||0));
+      const dataP = overP>0 ? [t.protein - overP, remP, overP] : [t.protein||0, remP];
+      const labelsP = overP>0 ? ['Achieved','Remaining','Over'] : ['Achieved','Remaining'];
+      const ctx5 = document.getElementById('pieProteinGoal')?.getContext('2d');
+      if (ctx5){ if (chPieProtGoal) chPieProtGoal.destroy(); chPieProtGoal = new Chart(ctx5, {
+        type:'pie', data:{ labels: labelsP, datasets:[{ data: dataP }] },
+        options:{ responsive:true, plugins:{ legend:{ position:'bottom' }, title:{ display:true, text:`Protein ${t.protein||0}/${g.proteinMin||0} g` } } }
+      }); }
     }
     // initial stats load
     loadStats();
