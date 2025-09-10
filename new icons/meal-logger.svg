@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Meal Logger • modern app icon (scales to any size) -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <!-- Background gradient -->
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4fd1c5"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <!-- Subtle top-light -->
+    <radialGradient id="gloss" cx="0.3" cy="0.2" r="0.7">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="60%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Plate ring gradient -->
+    <linearGradient id="ring" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#e8e8ff" stop-opacity="0.85"/>
+    </linearGradient>
+    <!-- Utensil color -->
+    <linearGradient id="ut" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1f2937"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#000" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect x="64" y="64" width="896" height="896" rx="220" fill="url(#bg)"/>
+  <!-- Soft inner highlight -->
+  <rect x="64" y="64" width="896" height="896" rx="220" fill="url(#gloss)"/>
+
+  <!-- Plate ring -->
+  <g transform="translate(512 520)" filter="url(#shadow)">
+    <circle r="250" fill="url(#ring)"/>
+    <circle r="180" fill="#fff"/>
+  </g>
+
+  <!-- Fork -->
+  <g transform="translate(420 430) rotate(-18)">
+    <rect x="-10" y="-90" width="20" height="210" rx="10" fill="url(#ut)"/>
+    <!-- prongs -->
+    <rect x="-44" y="-120" width="18" height="60" rx="6" fill="url(#ut)"/>
+    <rect x="-9"  y="-120" width="18" height="60" rx="6" fill="url(#ut)"/>
+    <rect x="26"  y="-120" width="18" height="60" rx="6" fill="url(#ut)"/>
+  </g>
+
+  <!-- Knife -->
+  <g transform="translate(612 430) rotate(18)">
+    <rect x="-12" y="-100" width="24" height="220" rx="12" fill="url(#ut)"/>
+    <path d="M -12 -120 Q 40 -100 8 -10 L -8 -10 Z" fill="url(#ut)"/>
+  </g>
+
+  <!-- Check mark ("logged") -->
+  <path d="M 340 670 L 430 760 L 690 540" fill="none" stroke="#16a34a" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
